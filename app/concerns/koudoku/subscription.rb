@@ -10,10 +10,11 @@ module Koudoku::Subscription
 
     belongs_to :plan
 
-    # update details.
-    before_save :processing!
-    def processing!
+    # update details. Note: to prevent recursive callbacks on the processing method, this callback
+    # can be skipped by setting @skip_proccessing_callback
+    before_save :processing!, unless: lambda { @skip_proccessing_callback == true }
 
+    def processing!
       # if their package level has changed ..
       if changing_plans? 
 
@@ -92,8 +93,7 @@ module Koudoku::Subscription
               customer_attributes = {
                 description: subscription_owner_description,
                 email: subscription_owner_email,
-                card: credit_card_token, # obtained with Stripe.js
-                plan: plan.stripe_id
+                card: credit_card_token # obtained with Stripe.js
               }
 
               # If the class we're being included in supports coupons ..
@@ -103,18 +103,27 @@ module Koudoku::Subscription
                 end
               end
 
-              # create a customer at that package level.
+              # create a customer without the plan to start
               customer = Stripe::Customer.create(customer_attributes)
-              
+
+              # Store the stripe customer id in our db.
+              # We do not want this save to trigger the 'processing' method again so force that
+              # callback to skip
+              @skip_proccessing_callback = true
+              self.update_attributes( {
+                stripe_id: customer.id,
+                last_four: customer.cards.retrieve(customer.default_card).last4
+              } )
+              @skip_proccessing_callback = false
+
+              # now that we have recorded the stripe_id in our system we can setup the subscription in stripe
+              customer.plan = plan.stripe_id
+              customer.save
             rescue Stripe::CardError => card_error
               errors[:base] << card_error.message
               card_was_declined
               return false
             end
-
-            # store the customer id.
-            self.stripe_id = customer.id
-            self.last_four = customer.cards.retrieve(customer.default_card).last4
 
             finalize_new_subscription!
             finalize_upgrade!
