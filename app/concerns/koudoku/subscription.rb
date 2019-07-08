@@ -124,13 +124,15 @@ module Koudoku::Subscription
               @skip_proccessing_callback = false
 
               # now that we have recorded the stripe_id in our system we can setup the subscription in stripe
-              plan_opts = { plan: plan.stripe_id }
-              plan_opts = subscription_options(plan_opts)
-
-              Stripe::Subscription.create({
+              sub_opts = {
                 customer: customer.id,
-                items: [plan_opts]
-              })
+                items: [{
+                  plan: plan.stripe_id
+                }]
+              }
+              sub_opts = subscription_options(sub_opts)
+
+              Stripe::Subscription.create(sub_opts)
               #customer.plan = plan.stripe_id
               #customer.save
             rescue Stripe::CardError => card_error
