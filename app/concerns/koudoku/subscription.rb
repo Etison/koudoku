@@ -132,9 +132,12 @@ module Koudoku::Subscription
               }
               sub_opts = subscription_options(sub_opts)
 
+              # Go ahead and create the subscription
               Stripe::Subscription.create(sub_opts)
-              #customer.plan = plan.stripe_id
-              #customer.save
+
+              # Now save the customer's plan
+              customer.plan = plan.stripe_id
+              customer.save
             rescue Stripe::CardError => card_error
               errors[:base] << card_error.message
               card_was_declined
