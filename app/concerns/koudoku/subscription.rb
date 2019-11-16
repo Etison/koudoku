@@ -119,7 +119,7 @@ module Koudoku::Subscription
               @skip_proccessing_callback = true
               self.update_attributes( {
                 stripe_id: customer.id,
-                last_four: customer.cards.retrieve(customer.default_card).last4
+                last_four: customer.sources.data.select{ |card| card.id == customer.default_source }.first&.last4
               } )
               @skip_proccessing_callback = false
 
@@ -197,7 +197,7 @@ module Koudoku::Subscription
     customer.save
 
     # update the last four based on this new card.
-    self.last_four = customer.cards.retrieve(customer.default_card).last4
+    self.last_four = customer.sources.data.select{ |card| card.id == customer.default_source }.first&.last4
 
     finalize_card_update!
   rescue Stripe::CardError => card_error
