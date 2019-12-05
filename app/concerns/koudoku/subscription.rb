@@ -6,6 +6,7 @@ module Koudoku::Subscription
     # We don't store these one-time use tokens, but this is what Stripe provides
     # client-side after storing the credit card information.
     attr_accessor :credit_card_token
+    attr_accessor :payment_method_token
     attr_accessor :skip_prorate_plan_changes
 
     belongs_to :plan
@@ -153,6 +154,8 @@ module Koudoku::Subscription
       # if they're updating their credit card details.
       elsif self.credit_card_token.present?
         update_default_stripe_card
+      elsif self.payment_method_token.present?
+        attach_payment_method_to_customer
       end
 
     end
@@ -238,6 +241,9 @@ module Koudoku::Subscription
   # CF Template methods.
   def subscription_options(opts = {})
     opts
+  end
+
+  def attach_payment_method_to_customer
   end
 
   # Template methods.
