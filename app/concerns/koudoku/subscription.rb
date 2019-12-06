@@ -100,9 +100,10 @@ module Koudoku::Subscription
 
               customer_attributes = {
                 description: subscription_owner_description,
-                email: subscription_owner_email,
-                card: credit_card_token # obtained with Stripe.js
+                email: subscription_owner_email
               }
+              customer_attributes[:card] = credit_card_token if credit_card_token.present?
+              customer_attributes[:payment_method] = payment_method_token if payment_method_token.present?
 
               # If the class we're being included in supports coupons ..
               if respond_to? :coupon
@@ -113,6 +114,9 @@ module Koudoku::Subscription
 
               # create a customer without the plan to start
               customer = Stripe::Customer.create(customer_attributes)
+              if payment_method_token.present?
+                customer.invoice_settings.default_payment_method = payment_method_token
+              end
 
               # Store the stripe customer id in our db.
               # We do not want this save to trigger the 'processing' method again so force that
