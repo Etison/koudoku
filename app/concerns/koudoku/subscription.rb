@@ -47,15 +47,34 @@ module Koudoku::Subscription
                 if stripe_plan.trial_period_days
                   trial_end = trial_end + stripe_plan.trial_period_days.to_i.days
                 end
-                opts = { plan: self.plan.stripe_id, trial_end: trial_end }
+                opts = {
+                  items: [{
+                    id: sub.items.data[0].id,
+                    plan: self.plan.stripe_id
+                  }],
+                  trial_end: trial_end
+                }
                 opts = subscription_options(opts)
-                customer.update_subscription(opts) if Koudoku.keep_trial_end
-              else
-                # update the package level with stripe.
-                opts = {plan: self.plan.stripe_id}
+                Stripe::Subscription.update(sub.id, opts) if Koudoku.keep_trial_end
+              elsif sub
+                opts = {
+                  items: [{
+                    id: sub.items.data[0].id,
+                    plan: self.plan.stripe_id
+                  }]
+                }
                 opts[:prorate] = false if skip_prorate_plan_changes
                 opts = subscription_options(opts)
-                customer.update_subscription(opts)
+                Stripe::Subscription.update(sub.id, opts)
+              else
+                # update the package level with stripe.
+                opts = {
+                  customer: customer.id,
+                  items: [{ plan: self.plan.stripe_id }]
+                }
+                opts[:prorate] = false if skip_prorate_plan_changes
+                opts = subscription_options(opts)
+                Stripe::Subscription.create(opts)
               end
 
               finalize_downgrade! if downgrading?
