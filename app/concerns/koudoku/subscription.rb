@@ -25,7 +25,7 @@ module Koudoku::Subscription
         if stripe_id.present?
 
           # fetch the customer.
-          customer = Stripe::Customer.retrieve(self.stripe_id)
+          @stripe_customer = Stripe::Customer.retrieve(self.stripe_id)
 
           # if a new plan has been selected
           if self.plan.present?
@@ -39,42 +39,42 @@ module Koudoku::Subscription
               # updating a default credit card
               update_default_stripe_card
 
-              sub = customer.subscriptions.first
-              if sub && sub.trial_end && sub.trial_end > Time.now.to_i
-                trial_end = sub.trial_end
+              @stripe_subscription = @stripe_customer.subscriptions.first
+              if @stripe_subscription && @stripe_subscription.trial_end && @stripe_subscription.trial_end > Time.now.to_i
+                trial_end = @stripe_subscription.trial_end
                 # update package level and adjust trial end to match current subscription trial_end + add starting plan trial
-                stripe_plan = Stripe::Plan.retrieve(self.plan.stripe_id)
-                if stripe_plan.trial_period_days
-                  trial_end = trial_end + stripe_plan.trial_period_days.to_i.days
+                @stripe_plan = Stripe::Plan.retrieve(self.plan.stripe_id)
+                if @stripe_plan.trial_period_days
+                  trial_end = trial_end + @stripe_plan.trial_period_days.to_i.days
                 end
                 opts = {
                   items: [{
-                    id: sub.items.data[0].id,
+                    id: @stripe_subscription.items.data[0].id,
                     plan: self.plan.stripe_id
                   }],
                   trial_end: trial_end
                 }
                 opts = subscription_options(opts)
-                Stripe::Subscription.update(sub.id, opts) if Koudoku.keep_trial_end
-              elsif sub
+                Stripe::Subscription.update(@stripe_subscription.id, opts) if Koudoku.keep_trial_end
+              elsif @stripe_subscription
                 opts = {
                   items: [{
-                    id: sub.items.data[0].id,
+                    id: @stripe_subscription.items.data[0].id,
                     plan: self.plan.stripe_id
                   }]
                 }
                 opts[:prorate] = false if skip_prorate_plan_changes
                 opts = subscription_options(opts)
-                Stripe::Subscription.update(sub.id, opts)
+                Stripe::Subscription.update(@stripe_subscription.id, opts)
               else
                 # update the package level with stripe.
                 opts = {
-                  customer: customer.id,
+                  customer: @stripe_customer.id,
                   items: [{ plan: self.plan.stripe_id }]
                 }
                 opts[:prorate] = false if skip_prorate_plan_changes
                 opts = subscription_options(opts)
-                Stripe::Subscription.create(opts)
+                @stripe_subscription = Stripe::Subscription.create(opts)
               end
 
               finalize_downgrade! if downgrading?
@@ -94,7 +94,7 @@ module Koudoku::Subscription
 
             # delete the subscription. - at_period_end if prorate == false
             begin
-              customer.cancel_subscription({:at_period_end => (!Koudoku.prorate).to_s })
+              @stripe_customer.cancel_subscription({:at_period_end => (!Koudoku.prorate).to_s })
             rescue => e
               logger.info "Error Canceling Stripe Subscription: #{e.to_s}"
               # assume already canceled by support
@@ -132,24 +132,33 @@ module Koudoku::Subscription
               end
 
               # create a customer without the plan to start
-              customer = Stripe::Customer.create(customer_attributes)
-              if payment_method_token.present?
-                customer.invoice_settings.default_payment_method = payment_method_token
-              end
+              @stripe_customer = Stripe::Customer.create(customer_attributes)
 
               # Store the stripe customer id in our db.
               # We do not want this save to trigger the 'processing' method again so force that
               # callback to skip
               @skip_proccessing_callback = true
               self.update_attributes( {
-                stripe_id: customer.id,
-                last_four: customer.sources.data.select{ |card| card.id == customer.default_source }.first&.last4
+                stripe_id: @stripe_customer.id,
+                last_four: @stripe_customer.sources.data.select{ |card| card.id == @stripe_customer.default_source }.first&.last4
               } )
+
               @skip_proccessing_callback = false
 
               # now that we have recorded the stripe_id in our system we can setup the subscription in stripe
-              customer.plan = plan.stripe_id
-              customer.save
+              opts = {
+                customer: @stripe_customer.id,
+                items: [{ plan: self.plan.stripe_id }],
+                trial_from_plan: Koudoku.keep_trial_end
+              }
+              if payment_method_token.present?
+                @stripe_customer.invoice_settings.default_payment_method = payment_method_token
+                opts[:default_payment_method] = payment_method_token
+              end
+
+              opts[:prorate] = false if skip_prorate_plan_changes
+              opts = subscription_options(opts)
+              @stripe_subscription = Stripe::Subscription.create(opts)
             rescue Stripe::CardError => card_error
               errors[:base] << card_error.message
               card_was_declined
@@ -217,13 +226,13 @@ module Koudoku::Subscription
     prepare_for_card_update
 
     # fetch the customer.
-    customer = Stripe::Customer.retrieve(self.stripe_id)
-    source = customer.sources.create(source: credit_card_token)
-    customer.default_source = source.id
-    customer.save
+    @stripe_customer ||= Stripe::Customer.retrieve(self.stripe_id)
+    source = @stripe_customer.sources.create(source: credit_card_token)
+    @stripe_customer.default_source = source.id
+    @stripe_customer.save
 
     # update the last four based on this new card.
-    self.last_four = customer.sources.data.select{ |card| card.id == customer.default_source }.first&.last4
+    self.last_four = @stripe_customer.sources.data.select{ |card| card.id == @stripe_customer.default_source }.first&.last4
 
     finalize_card_update!
   rescue Stripe::CardError => card_error
