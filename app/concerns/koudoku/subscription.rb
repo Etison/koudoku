@@ -7,6 +7,7 @@ module Koudoku::Subscription
     attr_accessor :credit_card_token
     attr_accessor :skip_prorate_plan_changes
     attr_accessor :invoice_immediately
+    attr_accessor :force_trial_end
 
     belongs_to :plan
 
@@ -40,13 +41,20 @@ module Koudoku::Subscription
 
               sub = customer.subscriptions.first
               if sub && sub.trial_end && sub.trial_end > Time.now.to_i
-                trial_end = sub.trial_end
-                # update package level and adjust trial end to match current subscription trial_end + add starting plan trial
-                stripe_plan = Stripe::Plan.retrieve(self.plan.stripe_id)
-                if stripe_plan.trial_period_days
-                  trial_end = trial_end + stripe_plan.trial_period_days.to_i.days
+                opts = { plan: self.plan.stripe_id }
+
+                if force_trial_end  # We are within a trial period.  BUT we were told explicitly to force the trial end
+                  opts[:trial_end] = "now"
+                else
+                  trial_end = sub.trial_end
+                  # update package level and adjust trial end to match current subscription trial_end + add starting plan trial
+                  stripe_plan = Stripe::Plan.retrieve(self.plan.stripe_id)
+                  if stripe_plan.trial_period_days
+                    trial_end = trial_end + stripe_plan.trial_period_days.to_i.days
+                  end
+                  opts[:trial_end] = trial_end
                 end
-                opts = { plan: self.plan.stripe_id, trial_end: trial_end }
+
                 opts = subscription_options(opts)
                 customer.update_subscription(opts) if Koudoku.keep_trial_end
               else
